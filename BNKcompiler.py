@@ -2,7 +2,7 @@
 
 from struct import pack, unpack
 from fnvhash import fnvhash
-from os import walk, path, mkdir, listdir
+from os import walk, path, mkdir, listdir, makedirs
 from collections import OrderedDict as Odict
 from io import BytesIO
 
@@ -30,12 +30,14 @@ Location:		Size:		Type:		Value:		What it is:
 """
 
 class BNK():
-    def __init__(self, name, source, output_path, mode='extract'):
+    def __init__(self, name, source, output_path, mode='extract', counter = None):
         self.name = name
         self.source = source        # this is a path pointing to either the path where all the wems are for recompilation, or the bank to be extracted
+        self.output_path = output_path      # the path that the wem's will be extrcted to, or the recompiled bnk will be written to
+
+        self.counter = counter
 
         if mode == 'extract':
-            self.output_path = output_path
             self.extract()
         else:
             self.included_wems = Odict()
@@ -50,8 +52,8 @@ class BNK():
                     if path.splitext(file)[1] == '.hirc':
                         self.included_hircs[name] = path.join(self.source, file)
 
-            for key in self.included_wems:
-                print(key)
+            #for key in self.included_wems:
+            #    print(key)
 
             self.num_wems = len(self.included_wems)        # for later
 
@@ -60,10 +62,15 @@ class BNK():
     def extract(self):
         # first, let's create an output directory
         if not path.exists(self.output_path):
-            mkdir(self.output_path)
+            makedirs(self.output_path)
 
         # next, open the bnk and extract what we need
-        with open('{}.BNK'.format(self.name), 'rb') as self.input:
+        if self.source == '':
+            # this will probably be depreciated
+            _input = '{}.BNK'.format(self.name)
+        else:
+            _input = self.source
+        with open(_input, 'rb') as self.input:
             cont = True     # tag to check whether or not to keep going
             while cont == True:
                 tag, data = self.read_bnk_chunk()
@@ -72,7 +79,6 @@ class BNK():
                 else:
                     # we don't actually need to do anything about the header
                     if tag == 'DIDX':
-                        print(data)
                         self.wem_sizes = Odict()        # use an ordered dict and use the id's as the keys, and the values are the sizes
                         self.wem_offsets = []           # list of the offsets of each wem (to save having to get the length and padding it. We get the data anyway, might as well use it...)
                         self.read_dataindex(data)
@@ -84,7 +90,12 @@ class BNK():
                     print(tag)
 
     def recompile(self):
-        with open('{}.BNK'.format(self.name.upper()), 'wb') as self.output:
+        if self.output_path == '':
+            # this will probably be depreciated
+            _output = '{}.BNK'.format(self.name.upper())
+        else:
+            _output = self.output_path
+        with open(_output, 'wb') as self.output:
             self.write_header()
             self.write_dataindex()
             self.write_data()
@@ -119,6 +130,8 @@ class BNK():
     def read_data(self, data):
         i = 0
         for wem_id in self.wem_sizes:
+            if self.counter is not None:
+                self.counter.set(i + 1)
             # move the cursor to the current offset (relative to the start of the data chunk)
             data.seek(self.wem_offsets[i])
             wem_size = self.wem_sizes[wem_id]
@@ -167,6 +180,8 @@ class BNK():
         self.output.write(pack('<I', self.total_data_size))     # data size
         counter = 1
         for file in self.included_wems:
+            if self.counter is not None:
+                self.counter.set(counter)
             filesize = path.getsize(self.included_wems[file])
             if counter != self.num_wems:
                 file_padding = self.align16(filesize) - filesize
