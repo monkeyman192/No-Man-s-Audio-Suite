@@ -55,6 +55,7 @@ class GUI(Frame):
         self.SoundBanksData = []     # this will hold all the soundbank Element objects that can be read from directly
 
         self.selectedAudioListType = 'Str'      # other possibilities: 'Inc' and 'Act'
+        self.searchTerm = StringVar()
 
         # progress bar stuff:
         self.num_files = 100
@@ -175,7 +176,8 @@ class GUI(Frame):
         self.searchFrame = Frame(self.AudioFrame)
         sortLabel = Label(self.searchFrame, text = "Search: ")
         sortLabel.pack(side = LEFT)
-        self.SoundsSortEntry = Entry(self.searchFrame)
+        seachCommand = self.register(self.SearchAudioList)
+        self.SoundsSortEntry = Entry(self.searchFrame, textvariable = self.searchTerm, validatecommand = (seachCommand, '%P'), validate = 'key')
         self.SoundsSortEntry.pack(side = LEFT)
         self.progbar = ttk.Progressbar(self.searchFrame, maximum=self.num_files, variable=self.curr_progress)
         self.progbar.pack(side = LEFT)
@@ -248,6 +250,8 @@ class GUI(Frame):
         self.StreamedFrame.pack(fill=BOTH, expand=YES)
         self.searchFrame.pack()
         self.checkButtonStates()
+        if self.searchTerm.get() != '':
+            self.SearchAudioList(self.searchTerm.get())
 
     def show_actions(self):
         # remove the current treeview and replace it with the list of actions
@@ -263,6 +267,8 @@ class GUI(Frame):
         self.ActionFrame.pack(fill=BOTH, expand=YES)
         self.searchFrame.pack()
         self.checkButtonStates()
+        if self.searchTerm.get() != '':
+            self.SearchAudioList(self.searchTerm.get())
 
     def show_included(self):
         # remove the current treeview and replace it with the list of included audios
@@ -278,6 +284,8 @@ class GUI(Frame):
         self.IncludedFrame.pack(fill=BOTH, expand=YES)
         self.searchFrame.pack()
         self.checkButtonStates()
+        if self.searchTerm.get() != '':
+            self.SearchAudioList(self.searchTerm.get())
 
     def generateSoundBankData(self):
         tree = ET.ElementTree()
@@ -301,25 +309,39 @@ class GUI(Frame):
                 if sb.attrib['Id'] == Id and sb.attrib['Language'] == language:
                     return sb
 
-    def SearchAudioList(self, term, lst, tview):
-        # this will search through the list lst for any names containing the string 'term', and return that list
-        # we will also need to get the treeview to update
-        pass
+    def SearchAudioList(self, term):
+        # populate each of the trees with only the entries that contain the substring 'term'
+        if self.selectedAudioListType == 'Str':
+            self.populateStreamedList(compare = term)
+        if self.selectedAudioListType == 'Act':
+            self.populateActionList(compare = term)
+        if self.selectedAudioListType == 'Inc':
+            self.populateIncludedList(compare = term)
+        return True
 
     @staticmethod
     def getEvents(soundbank):
         IncludedEvents = soundbank.find('IncludedEvents')
-        return IncludedEvents.findall('Event')
+        try:
+            return IncludedEvents.findall('Event')
+        except:
+            return []
 
     @staticmethod
     def getStreamed(soundbank):
         ReferencedStreamedFiles = soundbank.find('ReferencedStreamedFiles')
-        return ReferencedStreamedFiles.findall('File')
+        try:
+            return ReferencedStreamedFiles.findall('File')
+        except:
+            return []
 
     @staticmethod
     def getIncluded(soundbank):
         IncludedMemoryFiles = soundbank.find('IncludedMemoryFiles')
-        return IncludedMemoryFiles.findall('File')
+        try:
+            return IncludedMemoryFiles.findall('File')
+        except:
+            return []
     
     def treeview_sort_column(self, tv, col, reverse):
         l = [(tv.set(k, col), k) for k in tv.get_children('')]
@@ -338,6 +360,8 @@ class GUI(Frame):
         self.populateActionList()
         self.populateIncludedList()
         self.populateStreamedList()
+        if self.searchTerm.get() != '':
+            self.SearchAudioList(self.searchTerm.get())
 
     def populateSoundBankList(self):
         # this will populate the soud bank list with all the names
@@ -346,12 +370,12 @@ class GUI(Frame):
             if name == 'Vocal_Localised':
                 region = sb.find('Path').text.split('\\')[0]
                 name = '{0}_[{1}]'.format(name, region)
-            if name == 'NMS_Audio_Persistent':
+            elif name == 'NMS_Audio_Persistent':
                 self.SoundBanksListView.insert("", 0, values=name)
-            if name not in ["Init", "ConvVerb_Impulses"]:
+            elif name not in ["Init", "ConvVerb_Impulses"]:
                 self.SoundBanksListView.insert("", "end", values=name)
             
-    def populateActionList(self):
+    def populateActionList(self, compare = ''):
         # this will find what sound bank is selected and populate the action list with the list of actions in the bank
 
         # first clear the list
@@ -361,9 +385,13 @@ class GUI(Frame):
         sb_name = self.getSelectedSoundbankName()
         soundbank = self.searchSoundBanks(sb_name)
         for event in self.getEvents(soundbank):
-            self.ActionListView.insert("", "end", values=event.attrib["Name"])
+            if compare == '':
+                self.ActionListView.insert("", "end", values=event.attrib["Name"])
+            else:
+                if compare.upper() in event.attrib["Name"].upper():
+                    self.ActionListView.insert("", "end", values=event.attrib["Name"])
 
-    def populateStreamedList(self):
+    def populateStreamedList(self, compare = ''):
         # this will find what sound bank is selected and populate the action list with the list of actions in the bank
 
         # first clear the list
@@ -379,19 +407,27 @@ class GUI(Frame):
         
         #soundbank = self.searchSoundBanks(sb_name)
         for event in self.getStreamed(soundbank):
-            self.StreamedListView.insert("", "end", values=[event.find("ShortName").text, event.attrib['Id']])
+            if compare == '':
+                self.StreamedListView.insert("", "end", values=[event.find("ShortName").text, event.attrib['Id']])
+            else:
+                if compare.upper() in event.find("ShortName").text.upper():
+                    self.StreamedListView.insert("", "end", values=[event.find("ShortName").text, event.attrib['Id']])
 
-    def populateIncludedList(self):
+    def populateIncludedList(self, compare = ''):
         # this will find what sound bank is selected and populate the action list with the list of actions in the bank
 
         # first clear the list
-        self.StreamedListView.delete(*self.StreamedListView.get_children())
+        self.IncludedListView.delete(*self.IncludedListView.get_children())
 
         # now get the info and populate
         sb_name = self.getSelectedSoundbankName()
         soundbank = self.searchSoundBanks(sb_name)
         for event in self.getIncluded(soundbank):
-            self.IncludedListView.insert("", "end", values=[event.find("ShortName").text, event.attrib['Id']])
+            if compare == '':
+                self.IncludedListView.insert("", "end", values=[event.find("ShortName").text, event.attrib['Id']])
+            else:
+                if compare.upper() in event.find("ShortName").text.upper():
+                    self.IncludedListView.insert("", "end", values=[event.find("ShortName").text, event.attrib['Id']])
 
     def unpack_soundbank_threaded(self):
         sb_name = self.getSelectedSoundbankName()
@@ -480,19 +516,22 @@ class GUI(Frame):
         out_path = self.settings['outputPath']
         working_path = self.settings['workingPath']
         # we'll get the user to specify the file:
-        replacement_file = filedialog.askopenfilename(title = "Select the audio to use as replacement")
-        print(replacement_file)
-        if self.selectedAudioListType == 'Str':
-            # in this case we don't need to do any repacking of the bnk. We can simply replace the .wem in the AUDIO folder (ie. output folder)
-            wem_id = self.getSelectedAudioId(self.StreamedListView)
-            shutil.copy(replacement_file, path.join(out_path, '{}.WEM'.format(wem_id)))
-            self.highlightSelectedAudioId(self.StreamedListView)
-        elif self.selectedAudioListType == 'Inc':
-            wem_id = self.getSelectedAudioId(self.IncludedListView)
-            # now, we need to extract the entire bnk into the working directory, replace the existing file with the replacement one, then repack.
-            wem_id = self.getSelectedAudioId(self.IncludedListView)
-            shutil.copy(replacement_file, path.join(working_path, self.getSelectedSoundbankName().upper(), '{}.WEM'.format(wem_id)))
-            self.highlightSelectedAudioId(self.IncludedListView)
+        replacement_file = filedialog.askopenfilename(title = "Select the audio to use as replacement",
+                                                      initialdir = self.settings['additionPath'],
+                                                      filetypes = [('WEM file', '*.wem')])
+        if replacement_file != '':
+            # make sure something has actually been selected
+            if self.selectedAudioListType == 'Str':
+                # in this case we don't need to do any repacking of the bnk. We can simply replace the .wem in the AUDIO folder (ie. output folder)
+                wem_id = self.getSelectedAudioId(self.StreamedListView)
+                shutil.copy(replacement_file, path.join(out_path, '{}.WEM'.format(wem_id)))
+                self.highlightSelectedAudioId(self.StreamedListView)
+            elif self.selectedAudioListType == 'Inc':
+                wem_id = self.getSelectedAudioId(self.IncludedListView)
+                # now, we need to extract the entire bnk into the working directory, replace the existing file with the replacement one, then repack.
+                wem_id = self.getSelectedAudioId(self.IncludedListView)
+                shutil.copy(replacement_file, path.join(working_path, self.getSelectedSoundbankName().upper(), '{}.WEM'.format(wem_id)))
+                self.highlightSelectedAudioId(self.IncludedListView)
             
 
     def getPaths(self):
