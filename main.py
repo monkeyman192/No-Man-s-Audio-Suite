@@ -17,7 +17,13 @@ import shutil
 import threading
 
 # play audio
-import pyglet
+try:
+    import pyglet
+    ALLOWPLAYBACK = True
+except ImportError:
+    # in this case playback is not supported
+    print("ERROR!!! Please install the library 'pyglet' to allow for media playback\nMedia playback will be disabled")
+    ALLOWPLAYBACK = False
 
 from collections import OrderedDict
 
@@ -141,7 +147,7 @@ class GUI(Frame):
         # left panel for the sound banks list
         self.SoundBanksFrame = Frame(self.ListFrame)
         SBListFrame = Frame(self.SoundBanksFrame)
-        self.SoundBanksListView = ttk.Treeview(SBListFrame, columns = ['Sound Bank Name'], displaycolumns = '#all', selectmode = 'extended')
+        self.SoundBanksListView = ttk.Treeview(SBListFrame, columns = ['Sound Bank Name', 'path'], displaycolumns = [0], selectmode = 'extended')
         self.SoundBanksListView.heading("Sound Bank Name", text = "Sound Bank Name", command = lambda _col = "Sound Bank Name": self.treeview_sort_column(self.SoundBanksListView, _col, False))
         self.SoundBanksListView.column("Sound Bank Name", stretch = True, width = 300)
         self.SoundBanksListView["show"] = 'headings'
@@ -237,12 +243,13 @@ class GUI(Frame):
         self.playbackFrame = Frame(self.AudioFrame)
         self.convertButton = Button(self.playbackFrame, text = "Convert", command = self.convert_audio)
         self.convertButton.pack(side = LEFT)
-        self.playButton = Button(self.playbackFrame, text = "Play", command = self.play_audio, state = DISABLED)
-        self.playButton.pack(side = LEFT)
-        self.stopButton = Button(self.playbackFrame, text = "Stop", command = self.stop_audio, state = DISABLED)
-        self.stopButton.pack(side = LEFT)
-        self.playbackBar = ttk.Progressbar(self.playbackFrame, mode = 'determinate')
-        self.playbackBar.pack(side = LEFT)
+        if ALLOWPLAYBACK:
+            self.playButton = Button(self.playbackFrame, text = "Play", command = self.play_audio, state = DISABLED)
+            self.playButton.pack(side = LEFT)
+            self.stopButton = Button(self.playbackFrame, text = "Stop", command = self.stop_audio, state = DISABLED)
+            self.stopButton.pack(side = LEFT)
+            self.playbackBar = ttk.Progressbar(self.playbackFrame, mode = 'determinate')
+            self.playbackBar.pack(side = LEFT)
         self.playbackFrame.pack()
         
 
@@ -442,13 +449,15 @@ class GUI(Frame):
         # this will populate the soud bank list with all the names
         for sb in self.SoundBanksData:
             name = sb.find('ShortName').text
+            path = sb.find('Path').text.upper()
             if name == 'Vocal_Localised':
                 region = sb.find('Path').text.split('\\')[0]
                 name = '{0}_[{1}]'.format(name, region)
+                self.SoundBanksListView.insert("", "end", values=[name, path])
             elif name == 'NMS_Audio_Persistent':
-                self.SoundBanksListView.insert("", 0, values=name)
+                self.SoundBanksListView.insert("", 0, values=[name, path])
             elif name not in ["Init", "ConvVerb_Impulses"]:
-                self.SoundBanksListView.insert("", "end", values=name)
+                self.SoundBanksListView.insert("", "end", values=[name, path])
             
     def populateActionList(self, compare = ''):
         # this will find what sound bank is selected and populate the action list with the list of actions in the bank
@@ -468,7 +477,7 @@ class GUI(Frame):
 
     def populateStreamedList(self, compare = ''):
         # this will find what sound bank is selected and populate the action list with the list of actions in the bank
-        # compare is the seacrh string
+        # compare is the search string
 
         # first clear the list
         self.StreamedListView.delete(*self.StreamedListView.get_children())
@@ -476,9 +485,11 @@ class GUI(Frame):
         # now get the info and populate
         sb_name = self.getSelectedSoundbankName()
 
+        sb_path = path.splitext(self.getSelectedSoundbankPath())[0]
+
         # we need to do one extra step because the names of streamed files are not in the soundbanksinfo.xml, but only in the actual <soundbank_name>.xml
         sb_tree = ET.ElementTree()
-        sb_tree.parse(path.join(self.settings['audioPath'], '{}.XML'.format(sb_name.upper())))
+        sb_tree.parse(path.join(self.settings['audioPath'], '{}.XML'.format(sb_path)))
         soundbank = sb_tree.find('SoundBanks').find("SoundBank")
         
         #soundbank = self.searchSoundBanks(sb_name)
@@ -703,6 +714,10 @@ class GUI(Frame):
         iid = self.SoundBanksListView.focus()
         return self.SoundBanksListView.item(iid)['values'][0]
 
+    def getSelectedSoundbankPath(self):
+        iid = self.SoundBanksListView.focus()
+        return self.SoundBanksListView.item(iid)['values'][1]
+
     def check_file_exists(self, tview):
         iid = tview.focus()
         sb_id = tview.item(iid)['values'][1]
@@ -766,6 +781,8 @@ class GUI(Frame):
         # we need to first figure out what is selected
         sb_ids = self.getSelectedAudioIds(self.get_selectedSB())
 
+        basepath = path.split(self.getSelectedSoundbankPath())[0]
+
         # convert any selected files
         for sb_id in sb_ids:
             new_file = path.join(self.settings['convertedPath'], "{}.ogg".format(sb_id))
@@ -774,10 +791,18 @@ class GUI(Frame):
             if self.selectedAudioListType == 'Str':
                 # the path of the file will simply be the audio path + filename
                 # we need to move this file to converted, then pass *this* path to the converter
-                orig_path = path.join(self.settings['audioPath'], "{}.WEM".format(sb_id))
+                orig_path = path.join(basepath, self.settings['audioPath'], "{}.WEM".format(sb_id))
+                if not path.exists(orig_path):
+                    # in this case, let's just search for the file
+                    for root, dirs, files in walk(self.settings['audioPath']):
+                        for file in files:
+                            if path.splitext(file)[0] == str(sb_id):
+                                orig_path = path.join(root, file)
+                                break
                 # copy the file from the AUDIO folder to the converted folder
                 shutil.copy(orig_path, new_path)
             else:
+                """ this will need to change I think!!! """ # maybe only a little bit...
                 # in this case we also need to extract the individual file from the bnk
                 self.unpack_soundbank([sb_id])
                 orig_path = path.join(self.settings['workingPath'], self.getSelectedSoundbankName().upper(), "{}.WEM".format(sb_id))
@@ -822,8 +847,6 @@ class GUI(Frame):
         if firsttime:
             self.isPlaying = True
             progress += 0.001
-        print(progress)
-        print(self.isPlaying)
         self.playbackBar["value"] = progress
         if progress == 0.0:
             self.isPlaying = False
